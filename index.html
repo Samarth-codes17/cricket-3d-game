@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Cricket 3D FINAL PRO++</title>
+<style>
+body { margin:0; overflow:hidden; font-family:Arial; }
+
+#tvUI {
+    position:absolute;
+    top:10px;
+    left:50%;
+    transform:translateX(-50%);
+    display:flex;
+    width:80%;
+    justify-content:space-between;
+    color:white;
+}
+
+.panel {
+    background:rgba(0,0,0,0.7);
+    padding:10px;
+    border-radius:10px;
+    text-align:center;
+}
+
+#event { color:lime; font-size:22px; }
+#score { color:yellow; font-size:24px; }
+
+#powerBar {
+    position:absolute;
+    bottom:20px;
+    left:50%;
+    transform:translateX(-50%);
+    width:300px;
+    height:20px;
+    background:#333;
+}
+
+#powerFill {
+    height:100%;
+    width:0%;
+    background:linear-gradient(green,red);
+}
+</style>
+</head>
+
+<body>
+
+<div id="tvUI">
+    <div class="panel">
+        <div>YOU</div>
+        <div id="score">0/0</div>
+    </div>
+
+    <div class="panel">
+        <div id="event">READY</div>
+    </div>
+
+    <div class="panel">
+        <div>SPEED</div>
+        <div id="speed">110 km/h</div>
+    </div>
+</div>
+
+<div id="powerBar">
+    <div id="powerFill"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+
+<script>
+
+// SCENE
+let scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b1a2a);
+
+// CAMERA (slightly lower angle)
+let camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
+let renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// LOWER CAMERA ANGLE
+camera.position.set(0,4,12); // ⬅️ changed (was 6,14)
+camera.lookAt(0,2,0);
+
+// LIGHT
+let light = new THREE.DirectionalLight(0xffffff,0.6);
+light.position.set(10,20,10);
+scene.add(light);
+
+// GROUND
+let ground = new THREE.Mesh(
+    new THREE.CircleGeometry(40,64),
+    new THREE.MeshStandardMaterial({color:0x1f7a3d})
+);
+ground.rotation.x = -Math.PI/2;
+scene.add(ground);
+
+// STANDS
+let stands = new THREE.Mesh(
+    new THREE.CylinderGeometry(45,45,10,64,1,true),
+    new THREE.MeshStandardMaterial({color:0x444444, side:THREE.DoubleSide})
+);
+stands.position.y = 5;
+scene.add(stands);
+
+// PITCH
+let pitch = new THREE.Mesh(
+    new THREE.BoxGeometry(5,0.1,22),
+    new THREE.MeshStandardMaterial({color:0xc2a679})
+);
+pitch.position.y = 0.05;
+scene.add(pitch);
+
+// WICKETS
+function createWicket(z){
+    for(let i=-1;i<=1;i++){
+        let stump = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.1,0.1,2),
+            new THREE.MeshStandardMaterial({color:0xffffff})
+        );
+        stump.position.set(i*0.4,1,z);
+        scene.add(stump);
+    }
+}
+createWicket(9);
+createWicket(-14);
+
+// PLAYER GROUP
+let player = new THREE.Group();
+
+// body
+let body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.5,0.5,2),
+    new THREE.MeshStandardMaterial({color:0x0033ff})
+);
+body.position.y = 1;
+player.add(body);
+
+// BAT
+let bat = new THREE.Mesh(
+    new THREE.BoxGeometry(0.2,2,0.3),
+    new THREE.MeshStandardMaterial({color:0x8B4513})
+);
+bat.position.set(0.7,1.5,0);
+player.add(bat);
+
+player.position.set(0,0,8);
+scene.add(player);
+
+// BALL
+let ball = new THREE.Mesh(
+    new THREE.SphereGeometry(0.3),
+    new THREE.MeshStandardMaterial({color:0xff0000})
+);
+scene.add(ball);
+
+// BOWLER
+let bowler = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.5,0.5,2),
+    new THREE.MeshStandardMaterial({color:0xffaa00})
+);
+bowler.position.set(0,1,-12);
+scene.add(bowler);
+
+// BALLOONS
+let balloons=[];
+
+// VARS
+let runs=0;
+let speed=110;
+let state="bowling";
+let power=0;
+
+let hitPressed=false;
+let hitMoment=0;
+
+// 🎯 BAT ANIMATION CONTROL
+let isSwinging=false;
+
+// NEW BALL
+function newBall(){
+    ball.position.set(0,1,-15);
+    bowler.position.z=-12;
+    state="bowling";
+}
+
+// BALLOONS
+function spawnBalloons(){
+    for(let i=0;i<10;i++){
+        let angle=Math.random()*Math.PI*2;
+        let r=50+Math.random()*10;
+
+        let b=new THREE.Mesh(
+            new THREE.SphereGeometry(0.3),
+            new THREE.MeshStandardMaterial({color:Math.random()*0xffffff})
+        );
+
+        b.position.set(Math.cos(angle)*r,2,Math.sin(angle)*r);
+        b.userData.vy=0.05+Math.random()*0.05;
+
+        scene.add(b);
+        balloons.push(b);
+    }
+}
+
+// ANIMATE
+function animate(){
+    requestAnimationFrame(animate);
+
+    // bowler
+    if(state==="bowling"){
+        bowler.position.z+=0.05;
+        if(bowler.position.z>-10) bowler.position.z=-12;
+
+        ball.position.z+=speed/600;
+    }
+
+    // hit
+    if(state==="bowling" && Math.abs(ball.position.z-8)<1 && hitPressed){
+
+        hitPressed=false;
+        state="hit";
+
+        let isSix=power>70;
+
+        ball.userData.vz=isSix?-0.7:-0.6;
+        ball.userData.vx=(Math.random()-0.5)*0.6;
+        ball.userData.vy=isSix?0.6:0.3;
+
+        spawnBalloons();
+    }
+
+    // after hit
+    if(state==="hit"){
+        ball.position.z+=ball.userData.vz;
+        ball.position.x+=ball.userData.vx;
+        ball.position.y+=ball.userData.vy;
+
+        ball.userData.vy-=0.015;
+
+        if(ball.position.y<=0.3){
+            ball.position.y=0.3;
+            ball.userData.vy*=-0.5;
+        }
+
+        if(Math.hypot(ball.position.x,ball.position.z)>40){
+            runs+=4;
+            newBall();
+        }
+
+        document.getElementById("score").innerText=runs+"/0";
+    }
+
+    // 🎯 SMOOTH BAT SWING
+    if(isSwinging){
+        bat.rotation.x -= 0.15;
+
+        if(bat.rotation.x < -1.2){
+            isSwinging=false;
+        }
+    } else {
+        // return slowly
+        bat.rotation.x += 0.08;
+        if(bat.rotation.x > 0) bat.rotation.x = 0;
+    }
+
+    // balloons
+    balloons.forEach((b,idx)=>{
+        b.position.y+=b.userData.vy;
+
+        if(b.position.y>20){
+            scene.remove(b);
+            balloons.splice(idx,1);
+        }
+    });
+
+    renderer.render(scene,camera);
+}
+
+// CONTROLS
+document.addEventListener("keydown",e=>{
+    if(e.code==="Space"){
+
+        if(!isSwinging){
+            isSwinging=true; // trigger animation
+        }
+
+        hitPressed=true;
+        hitMoment=Date.now();
+
+        power=Math.min(100,power+30);
+        document.getElementById("powerFill").style.width=power+"%";
+    }
+});
+
+// DECAY
+setInterval(()=>{
+    power=Math.max(0,power-5);
+    document.getElementById("powerFill").style.width=power+"%";
+},100);
+
+newBall();
+animate();
+
+</script>
+
+</body>
+</html>
